@@ -1,4 +1,3 @@
-using Revise
 using DataFrames
 using KymatioWrapper
 using Test
