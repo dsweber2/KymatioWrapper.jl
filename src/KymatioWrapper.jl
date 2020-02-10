@@ -20,7 +20,8 @@ end
 
 
 """
-    ψ₁, ψ₂, ϕ₃, σξ = filter_bank(N, J=floor(log2(N)/2), Q=8)
+    ψ₁, ψ₂, ϕ₃, σξ = filter_bank(N::Real, J=floor(log2(N)/2), Q=8)
+    ψ, params, ϕₙ = filter_bank(N::Real, J=floor(log2(N)/2), Q=8)
 
 Slightly different format than the native one. Note that it rounds your length
     up to the next power of 2. ψ₁ is (length×nframes), and starts with the
@@ -60,10 +61,11 @@ function filter_bank(N,J=floor(Int,minimum(log2.(N))/2),L=8)
     params = DataFrame(params)
     rename!(params, [:j,:θ])
     println("keys of phi $(keys(filters_set["phi"]))")
-    ϕₙ = dict()
-        py"($(filters_set)['phi'][1][..., 0])".numpy()
-    ϕ₃ = py"($(filters_set)['phi'][2][..., 0])".numpy()
-    return ψ,params, ϕ₂, ϕ₃
+    ϕₙ = Dict()
+    for ii=1:J
+        ϕₙ[ii] = py"($(filters_set)['phi'][$ii-1][..., 0])".numpy()
+    end
+    return ψ, params, ϕₙ
 end
 
 scattering_filter_factory(N,J,Q) = filter_bank(N,J,Q)

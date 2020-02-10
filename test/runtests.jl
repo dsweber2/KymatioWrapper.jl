@@ -58,56 +58,22 @@ torch.cuda.is_available()
 end
 
 
-N=M = 32; J=3; L=8
-filters_set = py"filter_bank($M,$M,4,L=$L)"
-ϕₙ = Dict()
-filters_set[]
-for ii=1:J
-    ϕₙ[ii] = py"($(filters_set)['phi'][ii-1][..., 0])".numpy()
+@testset "filter_bank" begin
+    N = 450
+    nψ₁ = 23
+    nψ₂ = 6
+    ψ₁,ψ₂,ϕ₃,params = filter_bank(N)
+    @test size(ψ₁) == (2^ceil(log2(N)), nψ₁)
+    @test size(ψ₂) == (2^ceil(log2(N)), nψ₂)
+    @test size(ϕ₃) == (2^ceil(log2(N)),)
+    @test size(params[1])==(nψ₁,3)
+    @test size(params[2])==(nψ₂,3)
+    N = (25,25); J=2; L = 8
+    JL = J*L+1
+    ψ,params, ϕₙ = filter_bank(N)
+    @test size(ψ)==(N...,JL)
+    @test size(params) == (JL, 2)
+    @test length(ϕₙ)==J
+    @test size(ϕₙ[1]) ==N
+    @test size(ϕₙ[2]) == N .>>1
 end
-py"""
-from kymatio.scattering2d.utils import fft2
-"""
-heatmap(py"($(filters_set)['psi'][1][0][..., 0])".numpy())
-filters_set["psi"][1][0].numpy()
-keys(filters_set["phi"])
-keys(filters_set["psi"][2])
-size(filters_set["psi"][1][0].numpy())
-heatmap(filters_set["psi"][1][0].numpy()[:,:,1])
-heatmap(filters_set["psi"][1][0].numpy()[:,:,2])
-using Plots
-filters_set["psi"][24]["j"]
-size(filters_set["phi"][0])
-N = (26,26)
-N = (32, 32)
-filter_bank(N,4)
-
-function filter_bank(N,J=floor(minimum(log2.(N))/2),L=8)
-    filters_set = py"filter_bank($(N[1]),$(N[2]),$J,L=$L)"
-    nfilters = length(filters_set["psi"])+1
-    ψ = zeros(N,M, nfilters)
-    params = -1 .* ones(nfilters,2)
-    ψ[:,:,1] = py"($(filters_set)['phi'][0][..., 0])".numpy()
-    params[1,1] = filters_set["psi"][1]["j"]
-    params[1,2] = NaN
-    for ii=1:(nfilters-1)
-        ψ[:,:,nfilters-ii+1] = py"($(filters_set)['psi'][$(ii-1)][0][..., 0])".numpy()
-        params[nfilters-ii+1, 1] = filters_set["psi"][ii]["j"]
-        params[nfilters-ii+1, 2] = filters_set["psi"][ii]["theta"]
-    end
-    params = DataFrame(params)
-    names!(params, [:j,:θ])
-    ϕ₂ = py"($(filters_set)['phi'][1][..., 0])".numpy()
-    ϕ₃ = py"($(filters_set)['phi'][2][..., 0])".numpy()
-    return ψ,params, ϕ₂, ϕ₃
-end
-ψ₁,ψ₂,ϕ₃,σξ = scattering_filter_factory(234)
-size(ψ₁)
-plot(heatmap(ψ₂[1:128,:]), heatmap(ψ₁[1:128,:]), heatmap(daughters),layout=(3,1))
-
-using Wavelets
-daughters,ω = computeWavelets(234, wavelet(WT.Morlet()))
-size(daughters)
-
-using Shearlab
-
