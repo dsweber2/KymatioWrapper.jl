@@ -16,16 +16,17 @@ if !Conda.exists("torchvision")
 end
 println("torchvision installed")
 
-try
-    Conda.parseconda(`search kymatio`)
-catch
-    run(`$(pipPath) install kymatio`)
-end
 
 currentDirectory = pwd()
 pipPath = joinpath(root, "bin", "pip")
 pythonPath = joinpath(root, "bin", "python")
 run(`$(pipPath) install kymatio`)
+
+try
+    Conda.parseconda(`search kymatio`)
+catch
+    run(`$(pipPath) install kymatio`)
+end
 
 # cd(kymatioPath)
 # run(`$(pipPath) install -r requirements.txt`)
