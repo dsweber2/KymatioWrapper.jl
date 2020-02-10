@@ -1,4 +1,4 @@
-using DataFrames
+using DataFrames, PyCall
 using KymatioWrapper
 using Test
 py"""
@@ -13,9 +13,8 @@ torch.cuda.is_available()
 
 
 
-@testset "KymatioWrapper.jl" begin
+@testset "scattering.jl" begin
     useGpu = py"torch.cuda.is_available()"
-    useGpu = false
     J=6; Q=16; N = 2^13-2045
     T = 2^ceil.(Int, log2(N))
     Scatter = py"Scattering1D($J,$T,$Q)"
@@ -41,7 +40,7 @@ torch.cuda.is_available()
     @test sx ≈ permutedims(res, (4,3,1,2))
     # Write your own tests here.
 
-    s = Scattering((26,26))
+    s = Scattering((26,26),useGpu=useGpu)
     N = (26,26); J=2
     x = randn(N..., 4, 1); size(x)
     w= cat(x, zeros(6,26,4,1),dims=1); size(w)
