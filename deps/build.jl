@@ -10,12 +10,8 @@ using Pkg
 #     run(`git clone https://github.com/kymatio/kymatio $(kymatioPath)`)
 # end
 root = Symbol(Conda.ROOTENV)
-if !Conda.exists("torch", root)
+if !Conda.exists("torch", root) || !Conda.exists("torchvision", root)
     println("either pytorch not found, installing")
-    Conda.runconda(`install pytorch -c pytorch`)
-end
-if !Conda.exists("torchvision", root)
-    println("either torchvision not found, installing")
     Conda.runconda(`install pytorch torchvision -c pytorch`)
 end
 println("torchvision installed")

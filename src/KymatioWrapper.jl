@@ -4,7 +4,7 @@ using DataFrames
 using Interpolations
 using PyCall
 
-export filter_bank, scattering_filter_factory, Scattering
+export filter_bank, scattering_filter_factory, Scattering, computeJ
 
 function __init__()
     py"""
@@ -31,7 +31,7 @@ Slightly different format than the native one. Note that it rounds your length
     the array of dataframes σξ.
 """
 
-function filter_bank(N::Real, J=floor(Int, log2(N)/2), Q=8)
+function filter_bank(N::Real, J=computeJ(N), Q=8)
     T = ceil(Int, log2(N))
     phi_f, psi1_f, psi2_f,_ = py"scattering_filter_factory($T,$J,$Q)";
     ψ₁, params1 = extractDictionaries(phi_f,psi1_f,0)
@@ -42,7 +42,7 @@ function filter_bank(N::Real, J=floor(Int, log2(N)/2), Q=8)
     return (ψ₁, ψ₂, ϕ₃, σξ)
 end # module
 
-function filter_bank(N,J=floor(Int,minimum(log2.(N))/2),L=8)
+function filter_bank(N,J=computeJ(N),L=8)
     filters_set = py"filter_bank($(N[1]),$(N[2]),$J,L=$L)"
     nfilters = length(filters_set["psi"])+1
     ψ = zeros(N..., nfilters)
@@ -114,10 +114,11 @@ function padTo(x,N,M; dims=ndims(x))
     w = padTo(x,N,dims=ndims(x)-1)
     padTo(w,M,dims=ndims(x))
 end
+computeJ(N) = floor(Int, min(log2.(N)...)/2)
 ################################################################
 
 # 1D version
-function Scattering(N::Int64; J=floor(Int,log2(N)/2), Q=8, 
+function Scattering(N::Int64; J=computeJ(N), Q=8, 
                     max_order = 2, average=true, oversampling=0,
                     vectorize=true, useGpu=true)
     T = next2(N)
@@ -155,12 +156,13 @@ end
 
 function (s::Scattering{1})(x)
     flipped = false
-    if size(x,1)!=minimum(size(x))
+    if next2(size(x,1))==s.scatter.shape
         x = permutedims(x, (2:ndims(x)..., 1))
         flipped=true
     end
     T = s.scatter.T
     x = padTo(x,T)
+    println((size(x), typeof(x)))
     if s.useGpu
         res = s.scatter.forward(py"torch.from_numpy($x).cuda()")
     else
@@ -181,7 +183,7 @@ end
 
 
 
-function Scattering(N::Tuple{Int64, Int64}; J=floor(Int, min(log2.(N)...)/2),
+function Scattering(N::Tuple{Int64, Int64}; J=computeJ(N),
                     L=8, max_order=2, useGpu=true)
     # if you're using Julia size conventions, switch that around
     T = next2.(N)
@@ -197,7 +199,7 @@ end
 function (s::Scattering{2})(x)
     @assert maximum(s.scatter.shape .%2 .==0) "s has shape = $(s.scatter.shape)"
     flipped=false
-    if size(x,1)!=minimum(size(x)) && size(x,2)!=minimum(size(x))
+    if next2(size(x,1))==s.scatter.shape[1]
         x = permutedims(x, ((3:ndims(x))..., 1, 2))
         flipped=true
     end
