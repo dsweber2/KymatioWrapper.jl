@@ -18,8 +18,11 @@ println("torchvision installed")
 
 
 currentDirectory = pwd()
-pipPath = joinpath(String(root), "bin", "pip")
-pythonPath = joinpath(String(root), "bin", "python")
+if Sys.iswindows()
+    pipPath = joinpath(String(root), "Scripts", "pip")
+else
+    pipPath = joinpath(String(root), "bin", "pip")
+end
 run(`$(pipPath) install kymatio`)
 
 try
