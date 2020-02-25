@@ -1,8 +1,9 @@
 # KymatioWrapper
-A simple wrapper to be able to call Kymatio commands via julia. If the build
-isn't working on it's own, you may want to run the necessary commands on the
-command line. In the following, substitute root for the path to your conda
-environment (the value of `Conda.ROOTENV`):
+A simple wrapper to be able to call Kymatio commands via julia. Make sure 
+your PyCall isn't using the system-wide python, so that you can actually run 
+pip. If the build isn't working on it's own, you may want to run the 
+necessary commands on the command line. In the following, substitute root 
+for the path to your conda environment (the value of `Conda.ROOTENV`):
 ```
 > root/bin/conda install pytorch torchvision -c pytorch
 > root/bin/pip install kymatio
