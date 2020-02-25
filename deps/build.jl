@@ -34,7 +34,3 @@ end
 # run(`$(pipPath) install -r requirements_optional_cuda.txt`)
 
 cd(currentDirectory)
-
-
-ENV["PYTHON"] = ""
-Pkg.build("PyCall")
