@@ -38,7 +38,7 @@ function filter_bank(N::Real, J=computeJ(N), Q=8)
     ψ₂, params2 = extractDictionaries(phi_f,psi2_f,1)
     ϕ₃ = upInterp(phi_f[2],2^2)
     σξ = [DataFrame(params1'), DataFrame(params2')]
-    [names!(x, [:σ,:j,:ξ]) for x in σξ]
+    [rename!(x, [:σ,:j,:ξ]) for x in σξ]
     return (ψ₁, ψ₂, ϕ₃, σξ)
 end # module
 
@@ -47,20 +47,16 @@ function filter_bank(N,J=computeJ(N),L=8)
     nfilters = length(filters_set["psi"])+1
     ψ = zeros(N..., nfilters)
     params = -1 .* ones(nfilters,2)
-    println("first fine")
     ψ[:,:,1] = py"($(filters_set)['phi'][0][..., 0])".numpy()
     params[1,1] = filters_set["psi"][1]["j"]
     params[1,2] = NaN
-    println("second fine")
     for ii=1:(nfilters-1)
         ψ[:,:,nfilters-ii+1] = py"($(filters_set)['psi'][$(ii-1)][0][..., 0])".numpy()
         params[nfilters-ii+1, 1] = filters_set["psi"][ii]["j"]
         params[nfilters-ii+1, 2] = filters_set["psi"][ii]["theta"]
     end
-    println("through the for loop")
     params = DataFrame(params)
     rename!(params, [:j,:θ])
-    println("keys of phi $(keys(filters_set["phi"]))")
     ϕₙ = Dict()
     for ii=1:J
         ϕₙ[ii] = py"($(filters_set)['phi'][$ii-1][..., 0])".numpy()
@@ -162,7 +158,6 @@ function (s::Scattering{1})(x)
     end
     T = s.scatter.T
     x = padTo(x,T)
-    println((size(x), typeof(x)))
     if s.useGpu
         res = s.scatter.forward(py"torch.from_numpy($x).cuda()")
     else
@@ -203,7 +198,6 @@ function (s::Scattering{2})(x)
         x = permutedims(x, ((3:ndims(x))..., 1, 2))
         flipped=true
     end
-    println(size(x))
     x = padTo(x,s.scatter.shape...)
     torchX = 
     if s.useGpu
