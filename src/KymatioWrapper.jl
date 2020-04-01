@@ -4,7 +4,7 @@ using DataFrames
 using Interpolations
 using PyCall
 
-export filter_bank, scattering_filter_factory, Scattering, computeJ
+export filter_bank, scattering_filter_factory, Scattering, computeJ, numpyify
 
 function __init__()
     py"""
@@ -31,16 +31,41 @@ Slightly different format than the native one. Note that it rounds your length
     the array of dataframes σξ.
 """
 
-function filter_bank(N::Real, J=computeJ(N), Q=8)
+function filter_bank(N::Real, J::Real=computeJ(N), Q::Real=8)
     T = ceil(Int, log2(N))
     phi_f, psi1_f, psi2_f,_ = py"scattering_filter_factory($T,$J,$Q)";
-    ψ₁, params1 = extractDictionaries(phi_f,psi1_f,0)
-    ψ₂, params2 = extractDictionaries(phi_f,psi2_f,1)
-    ϕ₃ = upInterp(phi_f[2],2^2)
+    ψ₁, params1 = extractDictionaries(phi_f, psi1_f, 0)
+    ψ₂, params2 = extractDictionaries(phi_f, psi2_f, 1)
+    if 2 in keys(phi_f)
+        ϕ₃ = upInterp(phi_f[2], 2^2)
+    else
+        ϕ₃ = zeros(T)
+    end
     σξ = [DataFrame(params1'), DataFrame(params2')]
     [rename!(x, [:σ,:j,:ξ]) for x in σξ]
     return (ψ₁, ψ₂, ϕ₃, σξ)
-end # module
+end
+
+function filter_bank(ky::Scattering{1})
+    sc = ky.scatter
+    phi_f, psi1_f, psi2_f = (numpyify(sc.phi_f), numpyify(sc.psi1_f),
+                             numpyify(sc.psi2_f))
+    ψ₁, params1 = extractDictionaries(phi_f, psi1_f, 0)
+    ψ₂, params2 = extractDictionaries(phi_f, psi2_f, 1)
+    if 2 in keys(phi_f)
+        ϕ₃ = upInterp(phi_f[2], 2^2)
+    else
+        ϕ₃ = zeros(2^(sc.J_pad))
+    end
+    σξ = [DataFrame(params1'), DataFrame(params2')]
+    [rename!(x, [:σ,:j,:ξ]) for x in σξ]
+    return (ψ₁, ψ₂, ϕ₃, σξ)
+end
+function filter_bank(ky::Scattering{2})
+    N=641
+    filter_bank(N,ky.scatter.J, ky.scatter.L)
+end
+
 
 function filter_bank(N,J=computeJ(N),L=8)
     filters_set = py"filter_bank($(N[1]),$(N[2]),$J,L=$L)"
@@ -88,11 +113,12 @@ end
 given a vector of values, do a periodic cubic interpolation with k times as
     many entries
 """
-function upInterp(ϕ,k)
+function upInterp(ϕ::AbstractArray{T,1},k) where T
     itr = interpolate(ϕ, BSpline(Cubic(Periodic(OnGrid()))))
      x= range(1,length(ϕ),length=k*length(ϕ))
     return itr(x)
 end
+upInterp(ϕ::AbstractArray{T,2}, k) where T = upInterp(ϕ[:,1], k+1)
 
 struct Scattering{D}
     scatter::PyObject
@@ -110,13 +136,39 @@ function padTo(x,N,M; dims=ndims(x))
     w = padTo(x,N,dims=ndims(x)-1)
     padTo(w,M,dims=ndims(x))
 end
-computeJ(N) = floor(Int, min(log2.(N)...)/2)
+computeJ(N) = max(floor(Int, 1+min(log2.(N)...)/2), 3)
+"""
+Convert any torch pyobjects to numpy (and thus julia) arrays
+"""
+function numpyify(a::AbstractArray)
+    A = copy(a)
+    for d in A
+        for x in d
+            if length(x)==2 && typeof(x[2]) <: PyObject
+                d[x[1]] = (x[2].numpy())[:,1]
+            end
+        end
+    end
+    return A
+end
+function numpyify(d::Dict)
+    D = copy(d)
+    for x in D
+        if length(x)==2 && typeof(x[2]) <: PyObject
+            D[x[1]] = (x[2].numpy())[:,1]
+        end
+    end
+    return D
+end
 ################################################################
 
 # 1D version
 function Scattering(N::Int64; J=computeJ(N), Q=8, 
                     max_order = 2, average=true, oversampling=0,
                     vectorize=true, useGpu=true)
+    if J<2.13
+        @warn "silently does the wrong thing if J<2.13."
+    end
     T = next2(N)
     scatterer = py"Scattering1D($J,$T,$Q, $(max_order), $(average), $(oversampling), $(vectorize))"
     if useGpu
