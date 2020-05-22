@@ -19,6 +19,59 @@ function __init__()
 end
 
 
+struct Scattering{D}
+    scatter::PyObject
+    useGpu::Bool
+end
+
+######################### various utils #########################
+next2(N) = 2^ceil.(Int, log2(N))
+function padTo(x,T;dims = ndims(x)) 
+    szx = size(x)
+    toFill = zeros(eltype(x), szx[1:dims-1]..., T-szx[dims], szx[dims+1:end]...)
+    cat(x, toFill, dims=dims) # assumes the *last* dimension is the one you're using
+end
+function padTo(x,N,M; dims=ndims(x))
+    w = padTo(x,N,dims=ndims(x)-1)
+    padTo(w,M,dims=ndims(x))
+end
+computeJ(N) = max(floor(Int, 1+min(log2.(N)...)/2), 3)
+"""
+Convert any torch pyobjects to numpy (and thus julia) arrays
+"""
+function numpyify(a::AbstractArray)
+    A = copy(a)
+    for d in A
+        for x in d
+            if length(x)==2 && typeof(x[2]) <: PyObject
+                if x[2].is_cuda
+                    xp = x[2].clone().detach().cpu()
+                else
+                    xp = x
+                end
+                d[x[1]] = (xp.numpy())[:,1]
+            end
+        end
+    end
+    return A
+end
+function numpyify(d::Dict)
+    D = copy(d)
+    for x in D
+        if length(x)==2 && typeof(x[2]) <: PyObject
+                if x[2].is_cuda
+                    xp = x[2].clone().detach().cpu()
+                else
+                    xp = x[2]
+                end
+            D[x[1]] = (xp.numpy())[:,1]
+        end
+    end
+    return D
+end
+################################################################
+
+
 """
     ψ₁, ψ₂, ϕ₃, σξ = filter_bank(N::Real, J=floor(log2(N)/2), Q=8)
     ψ, params, ϕₙ = filter_bank(N::Real, J=floor(log2(N)/2), Q=8)
@@ -120,47 +173,6 @@ function upInterp(ϕ::AbstractArray{T,1},k) where T
 end
 upInterp(ϕ::AbstractArray{T,2}, k) where T = upInterp(ϕ[:,1], k+1)
 
-struct Scattering{D}
-    scatter::PyObject
-    useGpu::Bool
-end
-
-######################### various utils #########################
-next2(N) = 2^ceil.(Int, log2(N))
-function padTo(x,T;dims = ndims(x)) 
-    szx = size(x)
-    toFill = zeros(eltype(x), szx[1:dims-1]..., T-szx[dims], szx[dims+1:end]...)
-    cat(x, toFill, dims=dims) # assumes the *last* dimension is the one you're using
-end
-function padTo(x,N,M; dims=ndims(x))
-    w = padTo(x,N,dims=ndims(x)-1)
-    padTo(w,M,dims=ndims(x))
-end
-computeJ(N) = max(floor(Int, 1+min(log2.(N)...)/2), 3)
-"""
-Convert any torch pyobjects to numpy (and thus julia) arrays
-"""
-function numpyify(a::AbstractArray)
-    A = copy(a)
-    for d in A
-        for x in d
-            if length(x)==2 && typeof(x[2]) <: PyObject
-                d[x[1]] = (x[2].numpy())[:,1]
-            end
-        end
-    end
-    return A
-end
-function numpyify(d::Dict)
-    D = copy(d)
-    for x in D
-        if length(x)==2 && typeof(x[2]) <: PyObject
-            D[x[1]] = (x[2].numpy())[:,1]
-        end
-    end
-    return D
-end
-################################################################
 
 # 1D version
 function Scattering(N::Int64; J=computeJ(N), Q=8, 
@@ -169,10 +181,10 @@ function Scattering(N::Int64; J=computeJ(N), Q=8,
     if J<2.13
         @warn "silently does the wrong thing if J<2.13."
     end
-    T = next2(N)
+    T = N#next2(N)
     scatterer = py"Scattering1D($J,$T,$Q, $(max_order), $(average), $(oversampling), $(vectorize))"
     if useGpu
-        scatterer.cuda()
+        cuVersion = scatterer.cuda()
     end
     Scattering{1}(scatterer,useGpu)
 end
@@ -204,12 +216,10 @@ end
 
 function (s::Scattering{1})(x)
     flipped = false
-    if next2(size(x,1))==s.scatter.shape
-        x = permutedims(x, (2:ndims(x)..., 1))
-        flipped=true
-    end
+    x = permutedims(x, (2:ndims(x)..., 1))
+    flipped=true
     T = s.scatter.T
-    x = padTo(x,T)
+    #x = padTo(x,T)
     if s.useGpu
         res = s.scatter.forward(py"torch.from_numpy($x).cuda()")
     else
