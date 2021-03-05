@@ -4,7 +4,7 @@ using DataFrames
 using Interpolations
 using PyCall
 
-export filter_bank, scattering_filter_factory, Scattering
+export filter_bank, scattering_filter_factory, Scattering, computeJ, numpyify
 
 function __init__()
     py"""
@@ -19,6 +19,59 @@ function __init__()
 end
 
 
+struct Scattering{D}
+    scatter::PyObject
+    useGpu::Bool
+end
+
+######################### various utils #########################
+next2(N) = 2^ceil.(Int, log2(N))
+function padTo(x,T;dims = ndims(x)) 
+    szx = size(x)
+    toFill = zeros(eltype(x), szx[1:dims-1]..., T-szx[dims], szx[dims+1:end]...)
+    cat(x, toFill, dims=dims) # assumes the *last* dimension is the one you're using
+end
+function padTo(x,N,M; dims=ndims(x))
+    w = padTo(x,N,dims=ndims(x)-1)
+    padTo(w,M,dims=ndims(x))
+end
+computeJ(N) = max(floor(Int, 1+min(log2.(N)...)/2), 3)
+"""
+Convert any torch pyobjects to numpy (and thus julia) arrays
+"""
+function numpyify(a::AbstractArray)
+    A = copy(a)
+    for d in A
+        for x in d
+            if length(x)==2 && typeof(x[2]) <: PyObject
+                if x[2].is_cuda
+                    xp = x[2].clone().detach().cpu()
+                else
+                    xp = x
+                end
+                d[x[1]] = (xp.numpy())[:,1]
+            end
+        end
+    end
+    return A
+end
+function numpyify(d::Dict)
+    D = copy(d)
+    for x in D
+        if length(x)==2 && typeof(x[2]) <: PyObject
+                if x[2].is_cuda
+                    xp = x[2].clone().detach().cpu()
+                else
+                    xp = x[2]
+                end
+            D[x[1]] = (xp.numpy())[:,1]
+        end
+    end
+    return D
+end
+################################################################
+
+
 """
     ψ₁, ψ₂, ϕ₃, σξ = filter_bank(N::Real, J=floor(log2(N)/2), Q=8)
     ψ, params, ϕₙ = filter_bank(N::Real, J=floor(log2(N)/2), Q=8)
@@ -31,36 +84,57 @@ Slightly different format than the native one. Note that it rounds your length
     the array of dataframes σξ.
 """
 
-function filter_bank(N::Real, J=floor(Int, log2(N)/2), Q=8)
+function filter_bank(N::Real, J::Real=computeJ(N), Q::Real=8)
     T = ceil(Int, log2(N))
     phi_f, psi1_f, psi2_f,_ = py"scattering_filter_factory($T,$J,$Q)";
-    ψ₁, params1 = extractDictionaries(phi_f,psi1_f,0)
-    ψ₂, params2 = extractDictionaries(phi_f,psi2_f,1)
-    ϕ₃ = upInterp(phi_f[2],2^2)
+    ψ₁, params1 = extractDictionaries(phi_f, psi1_f, 0)
+    ψ₂, params2 = extractDictionaries(phi_f, psi2_f, 1)
+    if 2 in keys(phi_f)
+        ϕ₃ = upInterp(phi_f[2], 2^2)
+    else
+        ϕ₃ = zeros(T)
+    end
     σξ = [DataFrame(params1'), DataFrame(params2')]
-    [names!(x, [:σ,:j,:ξ]) for x in σξ]
+    [rename!(x, [:σ,:j,:ξ]) for x in σξ]
     return (ψ₁, ψ₂, ϕ₃, σξ)
-end # module
+end
 
-function filter_bank(N,J=floor(Int,minimum(log2.(N))/2),L=8)
+function filter_bank(ky::Scattering{1})
+    sc = ky.scatter
+    phi_f, psi1_f, psi2_f = (numpyify(sc.phi_f), numpyify(sc.psi1_f),
+                             numpyify(sc.psi2_f))
+    ψ₁, params1 = extractDictionaries(phi_f, psi1_f, 0)
+    ψ₂, params2 = extractDictionaries(phi_f, psi2_f, 1)
+    if 2 in keys(phi_f)
+        ϕ₃ = upInterp(phi_f[2], 2^2)
+    else
+        ϕ₃ = zeros(2^(sc.J_pad))
+    end
+    σξ = [DataFrame(params1'), DataFrame(params2')]
+    [rename!(x, [:σ,:j,:ξ]) for x in σξ]
+    return (ψ₁, ψ₂, ϕ₃, σξ)
+end
+function filter_bank(ky::Scattering{2})
+    N=641
+    filter_bank(N,ky.scatter.J, ky.scatter.L)
+end
+
+
+function filter_bank(N,J=computeJ(N),L=8)
     filters_set = py"filter_bank($(N[1]),$(N[2]),$J,L=$L)"
     nfilters = length(filters_set["psi"])+1
     ψ = zeros(N..., nfilters)
     params = -1 .* ones(nfilters,2)
-    println("first fine")
     ψ[:,:,1] = py"($(filters_set)['phi'][0][..., 0])".numpy()
     params[1,1] = filters_set["psi"][1]["j"]
     params[1,2] = NaN
-    println("second fine")
     for ii=1:(nfilters-1)
         ψ[:,:,nfilters-ii+1] = py"($(filters_set)['psi'][$(ii-1)][0][..., 0])".numpy()
         params[nfilters-ii+1, 1] = filters_set["psi"][ii]["j"]
         params[nfilters-ii+1, 2] = filters_set["psi"][ii]["theta"]
     end
-    println("through the for loop")
     params = DataFrame(params)
     rename!(params, [:j,:θ])
-    println("keys of phi $(keys(filters_set["phi"]))")
     ϕₙ = Dict()
     for ii=1:J
         ϕₙ[ii] = py"($(filters_set)['phi'][$ii-1][..., 0])".numpy()
@@ -92,38 +166,25 @@ end
 given a vector of values, do a periodic cubic interpolation with k times as
     many entries
 """
-function upInterp(ϕ,k)
+function upInterp(ϕ::AbstractArray{T,1},k) where T
     itr = interpolate(ϕ, BSpline(Cubic(Periodic(OnGrid()))))
      x= range(1,length(ϕ),length=k*length(ϕ))
     return itr(x)
 end
+upInterp(ϕ::AbstractArray{T,2}, k) where T = upInterp(ϕ[:,1], k+1)
 
-struct Scattering{D}
-    scatter::PyObject
-    useGpu::Bool
-end
-
-######################### various utils #########################
-next2(N) = 2^ceil.(Int, log2(N))
-function padTo(x,T;dims = ndims(x)) 
-    szx = size(x)
-    toFill = zeros(eltype(x), szx[1:dims-1]..., T-szx[dims], szx[dims+1:end]...)
-    cat(x, toFill, dims=dims) # assumes the *last* dimension is the one you're using
-end
-function padTo(x,N,M; dims=ndims(x))
-    w = padTo(x,N,dims=ndims(x)-1)
-    padTo(w,M,dims=ndims(x))
-end
-################################################################
 
 # 1D version
-function Scattering(N::Int64; J=floor(Int,log2(N)/2), Q=8, 
+function Scattering(N::Int64; J=computeJ(N), Q=8, 
                     max_order = 2, average=true, oversampling=0,
                     vectorize=true, useGpu=true)
-    T = next2(N)
+    if J<2.13
+        @warn "silently does the wrong thing if J<2.13."
+    end
+    T = N#next2(N)
     scatterer = py"Scattering1D($J,$T,$Q, $(max_order), $(average), $(oversampling), $(vectorize))"
     if useGpu
-        scatterer.cuda()
+        cuVersion = scatterer.cuda()
     end
     Scattering{1}(scatterer,useGpu)
 end
@@ -155,12 +216,10 @@ end
 
 function (s::Scattering{1})(x)
     flipped = false
-    if size(x,1)!=minimum(size(x))
-        x = permutedims(x, (2:ndims(x)..., 1))
-        flipped=true
-    end
+    x = permutedims(x, (2:ndims(x)..., 1))
+    flipped=true
     T = s.scatter.T
-    x = padTo(x,T)
+    #x = padTo(x,T)
     if s.useGpu
         res = s.scatter.forward(py"torch.from_numpy($x).cuda()")
     else
@@ -181,7 +240,7 @@ end
 
 
 
-function Scattering(N::Tuple{Int64, Int64}; J=floor(Int, min(log2.(N)...)/2),
+function Scattering(N::Tuple{Int64, Int64}; J=computeJ(N),
                     L=8, max_order=2, useGpu=true)
     # if you're using Julia size conventions, switch that around
     T = next2.(N)
@@ -197,11 +256,10 @@ end
 function (s::Scattering{2})(x)
     @assert maximum(s.scatter.shape .%2 .==0) "s has shape = $(s.scatter.shape)"
     flipped=false
-    if size(x,1)!=minimum(size(x)) && size(x,2)!=minimum(size(x))
+    if next2(size(x,1))==s.scatter.shape[1]
         x = permutedims(x, ((3:ndims(x))..., 1, 2))
         flipped=true
     end
-    println(size(x))
     x = padTo(x,s.scatter.shape...)
     torchX = 
     if s.useGpu

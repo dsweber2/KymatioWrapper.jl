@@ -34,12 +34,13 @@ torch.cuda.is_available()
     end
     res = scX.cpu().numpy()
     s = Scattering(N, Q=16,useGpu=useGpu)
+    s.scatter.shape
     sx = s(x)
     size(sx)
     size(permutedims(res, (4,3,1,2)))
     @test sx ≈ permutedims(res, (4,3,1,2))
     # Write your own tests here.
-
+    s.scatter.shape
     s = Scattering((26,26),useGpu=useGpu)
     N = (26,26); J=2
     x = randn(N..., 4, 1); size(x)

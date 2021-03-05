@@ -1,12 +1,13 @@
 # KymatioWrapper
-A simple wrapper to be able to call Kymatio commands via julia. Before
-installing, you may want to set the environmental variable `PATH_TO_KYMATIO` to
-a location other than your home directory (the default install). From within julia, do this via `ENV["PATH_TO_KYMATIO"] = /your/pathname/kymatio`
-
-
-1. install pytorch via conda
-2. download kymatio via `git clone https://github.com/kymatio/kymatio`
-3. 
+A simple wrapper to be able to call Kymatio commands via julia. Make sure 
+your PyCall isn't using the system-wide python, so that you can actually run 
+pip. If the build isn't working on it's own, you may want to run the 
+necessary commands on the command line. In the following, substitute root 
+for the path to your conda environment (the value of `Conda.ROOTENV`):
+```
+> root/bin/conda install pytorch torchvision -c pytorch
+> root/bin/pip install kymatio
+```
 
 # 1D Example
 ```
