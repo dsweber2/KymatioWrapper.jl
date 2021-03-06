@@ -18,37 +18,42 @@ torch.cuda.is_available()
     T = 2^ceil.(Int, log2(N))
     Scatter = py"Scattering1D($J,$N,Q=$Q, max_order=$2, average=$true, oversampling=$0, backend='torch')"
     if useGpu
-        Scatter.cuda()
+        ScatterGpu = py"Scattering1D($J,$N,Q=$Q, max_order=$2, average=$true, oversampling=$0, backend='torch')"
+        ScatterGpu.cuda()
     end
     t = (range(0, 2π, length=N));
     x = zeros(Float32, N, 5, 3);
     for (ii, ω) in enumerate(floor.(Int, range(1, 150, length=5))), jj in 1:3
         x[:,ii,jj] = sin.(ω / jj .* t) + cos.(100 * ω / jj .* t.^2)
     end
-    pX = Float32.(cat(x, zeros(T - N, 5, 3), dims=1)); (size(pX), typeof(pX))
-    if useGpu
-        scX = Scatter.forward(py"torch.from_numpy($(permutedims(x,(2,3,1)))).cuda().contiguous()")
-    else
-        scX = Scatter.forward(py"torch.from_numpy($(permutedims(pX,(2,3,1)))).contiguous()")
-    end
-    res = scX.cpu().numpy()
-    s = Scattering(N, Q=16, useGpu=useGpu)
+    scX = Scatter.forward(py"torch.from_numpy($(permutedims(x,(2,3,1)))).contiguous()")
+    res = scX.numpy()
+    s = Scattering(N, Q=16, useGpu=false)
     sx = s(x)
     @test sx ≈ permutedims(res, (4, 3, 1, 2))
-    s = Scattering((26, 26), useGpu=useGpu)
+    if useGpu
+        scXGpu = ScatterGpu.forward(py"torch.from_numpy($(permutedims(x,(2,3,1)))).cuda().contiguous()")
+        resGpu = scX.cpu().numpy()
+        s = Scattering(N, Q=16, useGpu=true)
+        sx = s(x)
+        @test sx ≈ permutedims(resGpu, (4, 3, 1, 2))
+    end
     N = (26, 26); J = 2
     x = randn(N..., 4, 1); size(x)
     w = Float32.(cat(x, zeros(6, 26, 4, 1), dims=1)); size(w)
     wx = Float32.(cat(w, zeros(32, 6, 4, 1), dims=2)); size(wx)
-    if useGpu
-        Scatter = py"Scattering2D(3, shape=(32,32), L=8,backend='torch').cuda()"
-        res = Scatter.forward(py"torch.from_numpy($(permutedims(wx,(3,4,1,2)))).contiguous().cuda()")
-    else
-        Scatter = py"Scattering2D(3, shape=(32,32), L=8,backend='torch')"
-        res = Scatter.forward(py"torch.from_numpy($(permutedims(wx,(3,4,1,2)))).contiguous()")
-    end
-    res = res.cpu().numpy(); size(res)
+    s = Scattering((26, 26), useGpu=false)
+    Scatter = py"Scattering2D(3, shape=(32,32), L=8,backend='torch')"
+    res = Scatter.forward(py"torch.from_numpy($(permutedims(wx,(3,4,1,2)))).contiguous()")
+    res = res.numpy()
     @test s(x) ≈ permutedims(res, (5, 4, 3, 1:2...))
+    if useGpu
+        ScatterGpu = py"Scattering2D(3, shape=(32,32), L=8,backend='torch').cuda()"
+        resGpu = Scatter.forward(py"torch.from_numpy($(permutedims(wx,(3,4,1,2)))).contiguous()")
+        resGpu = resGpu.cpu().numpy()
+        sGpu = Scattering((26, 26), useGpu=useGpu)
+        @test sGpu(x) ≈ permutedims(resGpu, (5, 4, 3, 1:2...))
+    end
 end
 
 
